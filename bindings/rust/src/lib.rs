@@ -36,6 +36,7 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+pub mod connection_pool;
 pub mod params;
 mod rows;
 pub mod transaction;
@@ -46,6 +47,7 @@ use transaction::TransactionBehavior;
 use turso_core::types::WalFrameInfo;
 pub use value::Value;
 
+use connection_pool::ConnectionPool;
 pub use params::params_from_iter;
 pub use params::IntoParams;
 
@@ -206,6 +208,7 @@ impl Builder {
 #[derive(Clone)]
 pub struct Database {
     inner: Arc<turso_core::Database>,
+    connection_pool: ConnectionPool<Connection>,
 }
 
 unsafe impl Send for Database {}
