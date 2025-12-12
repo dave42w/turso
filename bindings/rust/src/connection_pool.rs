@@ -16,11 +16,11 @@ use std::sync::{Arc, Mutex};
 const POOL_SIZE: usize = 100;
 
 #[derive(Clone)]
-pub(crate) struct ConnectionPool<Connection> {
+pub(crate) struct ConnectionPool {
     pool: Arc<Mutex<Vec<Connection>>>,
 }
 
-impl<Connection> ConnectionPool<Connection> {
+impl ConnectionPool {
     pub(crate) fn new() -> Self {
         ConnectionPool {
             pool: Arc::new(Mutex::new(Vec::with_capacity(POOL_SIZE))),
@@ -32,7 +32,7 @@ impl<Connection> ConnectionPool<Connection> {
         pool.pop()
     }
 
-    pub(crate) fn return_to_pool(&self, obj: Connection) {
+    pub(crate) fn add_to_pool(&self, obj: Connection) {
         let mut pool = self.pool.lock().unwrap();
         pool.push(obj);
     }
