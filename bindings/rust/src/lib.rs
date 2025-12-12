@@ -98,6 +98,7 @@ pub struct Builder {
     enable_encryption: bool,
     vfs: Option<String>,
     encryption_opts: Option<EncryptionOpts>,
+    enable_connection_pool: bool,
 }
 
 impl Builder {
@@ -109,6 +110,7 @@ impl Builder {
             enable_encryption: false,
             vfs: None,
             encryption_opts: None,
+            enable_connection_pool: false,
         }
     }
 
@@ -127,6 +129,10 @@ impl Builder {
         self
     }
 
+    pub fn with_connection_pool(mut self, connection_pool_enabled: bool) -> Self {
+        self.enable_connection_pool = connection_pool_enabled;
+        self
+    }
     pub fn with_io(mut self, vfs: String) -> Self {
         self.vfs = Some(vfs);
         self
@@ -146,7 +152,12 @@ impl Builder {
             opts,
             self.encryption_opts.clone(),
         )?;
-        Ok(Database { inner: db })
+
+        let pool = self.build_connection_pool(self.enable_connection_pool);
+        Ok(Database {
+            inner: db,
+            connection_pool: pool,
+        })
     }
 
     fn get_io(&self) -> Result<Arc<dyn turso_core::IO>> {
@@ -200,6 +211,13 @@ impl Builder {
             )),
         }
     }
+
+    fn build_connection_pool(&self, pool_enabled: bool) -> Option<ConnectionPool> {
+        match pool_enabled {
+            true => Some(ConnectionPool::new()),
+            _ => None,
+        }
+    }
 }
 
 /// A database.
@@ -208,7 +226,7 @@ impl Builder {
 #[derive(Clone)]
 pub struct Database {
     inner: Arc<turso_core::Database>,
-    connection_pool: ConnectionPool<Connection>,
+    connection_pool: Option<ConnectionPool>,
 }
 
 unsafe impl Send for Database {}
@@ -223,8 +241,18 @@ impl Debug for Database {
 impl Database {
     /// Connect to the database.
     pub fn connect(&self) -> Result<Connection> {
+        match &self.connection_pool {
+            Some(pool) => match pool.get() {
+                Some(conn) => return Ok(conn),
+                None => return self._connect(),
+            },
+            None => return self._connect(),
+        }
+    }
+
+    fn _connect(&self) -> Result<Connection> {
         let conn = self.inner.connect()?;
-        Ok(Connection::create(conn))
+        return Ok(Connection::create(conn));
     }
 }
 
@@ -273,6 +301,11 @@ impl Clone for Connection {
     }
 }
 
+impl Drop for Connection {
+    fn drop(&mut self) {
+        eprintln!("Connection dropped");
+    }
+}
 unsafe impl Send for Connection {}
 unsafe impl Sync for Connection {}
 
@@ -865,6 +898,38 @@ mod tests {
                 assert!(rows_iter.next().await?.is_none());
             }
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_enable_connection_pool() -> Result<()> {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path().to_str().unwrap();
+
+        let db = Builder::new_local(db_path).build().await?;
+        assert!(
+            db.connection_pool.is_none(),
+            "Connection pool not created default is not enabled"
+        );
+
+        let db = Builder::new_local(db_path)
+            .with_connection_pool(false)
+            .build()
+            .await?;
+        assert!(
+            db.connection_pool.is_none(),
+            "Connection pool not created as specifically not enabled"
+        );
+
+        let db = Builder::new_local(db_path)
+            .with_connection_pool(true)
+            .build()
+            .await?;
+        assert!(
+            db.connection_pool.is_some(),
+            "Connection pool created as specifically enabled"
+        );
 
         Ok(())
     }
